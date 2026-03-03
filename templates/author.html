@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Author - Reading List{% endblock %}
+
+{% block content %}
+<header>
+    <h1>Tufts Greek Reading List Reader</h1>
+    <p class="reference">See full list <a href="https://as.tufts.edu/classicalstudies/resources/ma-classics-reading-lists">here</a>.</p>
+</header>
+
+<div class="content">
+    {{ author|safe }}
+    {{ works|safe }}
+</div>
+{% endblock %}

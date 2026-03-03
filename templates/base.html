@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{% block title %}Heike Reader{% endblock %}</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Gentium Plus', "Gentium", 'New Athena Unicode', sans-serif;
+                line-height: 1.8;
+                color: #333;
+                background-color: #f5f5f5;
+                padding: 20px;
+            }
+            
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background: white;
+                padding: 40px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                border-radius: 8px;
+            }
+            
+            header {
+                border-bottom: 2px solid #8b4513;
+                padding-bottom: 20px;
+                margin-bottom: 30px;
+            }
+            
+            h1 {
+                color: #8b4513;
+                font-size: 2em;
+                margin-bottom: 10px;
+            }
+            
+            h2 {
+                color: #8b4513;
+                font-size: 1.5em;
+                margin: 30px 0 20px 0;
+                border-left: 4px solid #8b4513;
+                padding-left: 15px;
+            }
+            
+            .reference {
+                color: #666;
+                font-size: 0.9em;
+                font-family: monospace;
+            }
+            
+            .content {
+                font-size: 1.1em;
+                line-height: 2;
+            }
+            
+            .content p {
+                margin-bottom: 1.5em;
+                text-indent: 1em;
+            }
+            
+            .sentence {
+                display: inline;
+            }
+            
+            .navigation {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 1px solid #ddd;
+            }
+            
+            .nav-button {
+                display: inline-block;
+                padding: 10px 20px;
+                background-color: #8b4513;
+                color: white;
+                text-decoration: none;
+                border-radius: 4px;
+                transition: background-color 0.3s;
+            }
+            
+            .nav-button:hover {
+                background-color: #6b3410;
+            }
+            
+            .nav-button.disabled {
+                background-color: #ccc;
+                pointer-events: none;
+            }
+            
+            .home-link {
+                color: #8b4513;
+                text-decoration: none;
+                font-size: 0.9em;
+            }
+            
+            .home-link:hover {
+                text-decoration: underline;
+            }
+
+            .glossable-token {
+                cursor: pointer;
+                border-bottom: 1px dotted #8b4513;
+                transition: background-color 0.2s;
+            }
+        
+            .glossable-token:hover {
+                background-color: #fff3e0;
+            }
+            
+            .glossable-token.active {
+                background-color: #ffe0b2;
+                font-weight: bold;
+            }
+            
+            .gloss-box {
+                display: block;
+                margin: 10px 0 10px 20px;
+                padding: 15px;
+                background-color: #f5f5f5;
+                border-left: 4px solid #8b4513;
+                border-radius: 4px;
+                font-size: 0.95em;
+                animation: slideDown 0.2s ease-out;
+            }
+            
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            .gloss-box .token-display {
+                font-size: 1.3em;
+                font-weight: bold;
+                color: #8b4513;
+                margin-bottom: 8px;
+            }
+            
+            .gloss-box .transliteration {
+                color: #666;
+                font-style: italic;
+                margin-bottom: 8px;
+            }
+            
+            .gloss-box .lemma {
+                margin-bottom: 8px;
+            }
+            
+            .gloss-box .definition {
+                color: #333;
+            }
+            
+            .gloss-box .label {
+                font-weight: bold;
+                color: #8b4513;
+            }
+            
+            .translation-word {
+                transition: background-color 0.2s;
+                padding: 2px;
+                border-radius: 2px;
+            }
+
+            .translation-word.highlighted {
+                background-color: #ffeb3b;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get all glossable tokens
+            const tokens = document.querySelectorAll('.glossable-token');
+            
+            tokens.forEach(token => {
+                token.addEventListener('click', function(e) {
+                    e.preventDefault();
+
+                    const sentenceSpan = this.closest('.sentence');
+                    const insertionPoint = sentenceSpan || this;
+                    const existingGloss = insertionPoint.nextElementSibling;
+
+                    if (existingGloss && existingGloss.classList.contains('gloss-box')) {
+                        existingGloss.remove();
+                        this.classList.remove('active');
+                    } else {
+                        document.querySelectorAll('.gloss-box').forEach(g => g.remove());
+                        document.querySelectorAll('.glossable-token.active').forEach(t => t.classList.remove('active'));
+
+                        const glossBox = createGlossBox(this);
+                        this.classList.add('active');
+                        insertionPoint.insertAdjacentElement('afterend', glossBox);
+                    }
+                });
+            });
+            
+            function createGlossBox(tokenElement) {
+                console.log(tokenElement.dataset)
+                const form = tokenElement.dataset.form;
+                const lemma = tokenElement.dataset.lemma;
+                const postag = tokenElement.dataset.postag;
+                const head = tokenElement.dataset.head;
+                const relation = tokenElement.dataset.relation;
+                const gloss = tokenElement.dataset.gloss;
+                
+                const glossBox = document.createElement('div');
+                glossBox.className = 'gloss-box';
+                
+                glossBox.innerHTML = `
+                    <div class="token-display">${form}</div>
+                    ${lemma ? `<div class="lemma"><span class="label">Lemma:</span> ${lemma}</div>` : ''}
+                    ${postag ? `<div class="postag"><span class="label">Part of Speech:</span> ${postag}</div>` : ''}
+                    ${head ? `<div class="head"><span class="label">Head:</span> ${head}</div>` : ''}
+                    ${relation ? `<div class="relation"><span class="label">Dependency relation:</span> ${relation}</div>` : ''}
+                    ${gloss ? `<div class="definition"><span class="label">Gloss:</span> ${gloss}</div>` : ''}
+                `;
+                
+                return glossBox;
+            }
+
+            const translationWords = document.querySelectorAll('.translation-word');
+            tokens.forEach(token => {
+                token.addEventListener('mouseenter', function() {
+                    const alignmentIds = this.dataset.alignment;
+                    if (alignmentIds) {
+                        // Split by comma to get multiple IDs
+                        const ids = alignmentIds.split(',');
+                        ids.forEach(id => {
+                            const aligned = document.querySelector(`[data-eng-id="${id.trim()}"]`);
+                            if (aligned) {
+                                aligned.classList.add('highlighted');
+                            }
+                        });
+                    }
+                });
+                
+                token.addEventListener('mouseleave', function() {
+                    translationWords.forEach(w => {
+                        w.classList.remove('highlighted');
+                    });
+                });
+            });
+        
+        });
+        </script>
+    </body>
+</html>

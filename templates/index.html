@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Reading List - Home{% endblock %}
+
+{% block content %}
+<header>
+    <h1>Tufts Greek Reading List Reader</h1>
+    <p class="reference">See full list <a href="https://as.tufts.edu/classicalstudies/resources/ma-classics-reading-lists">here</a>.</p>
+</header>
+
+<div class="content">
+    <h2>Welcome to the Tufts Greek Reading List Reader</h2>
+    <p>This digital edition of several Ancient Greek texts provides a word-level textual annotations and sentence-by-sentence translations.</p>
+    
+    <div style="display: flex; gap: 20px; margin: 40px 0; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <a href="/browse" class="nav-button" style="display: block; text-align: center; padding: 20px;">
+                Browse by Author
+            </a>
+            <p style="margin-top: 10px; color: #666; font-size: 0.9em;">
+                Navigate by sentence
+            </p>
+        </div>
+        
+        <div style="flex: 1; min-width: 200px;">
+            <a href="/browse/aeschylus/eumenides" class="nav-button" style="display: block; text-align: center; padding: 20px;">
+                Aeschylus - Eumenides
+            </a>
+        </div>
+    </div>
+    
+</div>
+{% endblock %}
