@@ -173,8 +173,7 @@ def render_span(elem, eng_word_to_ids, sent_id, id_to_word=None):
     relation = elem.get("relation", "")
 
     # glosses = glosses_lookup[glosses_lookup['greek_id'] == int(word_id)]
-    glosses = glosses_lookup.loc[int(word_id)] if int(word_id) in glosses_lookup.index else pd.DataFrame()
-    gloss = glosses['gloss'].values[0] if not glosses.empty else ""
+    gloss = glosses_lookup.loc[int(word_id)] if int(word_id) in glosses_lookup.index else ""
     head = id_to_word.get(head_id, "Elliptical") if head_id != "0" else "Root"
 
     # print(f"Sentence ID: {sent_id}")
