@@ -60,23 +60,6 @@ def load_reading_list(yaml_path = "reading_list.yaml"):
     return works
 WORKS = load_reading_list()
 
-AUTHOR_WORK_TO_PATH = [
-    # missing bacchae
-    {("Aeschylus", "Eumenides"): "data/0085-007/0085-007.xml"},
-    {("Christian Scripture", "John"): "data/0031-004/0031-004.xml"},
-    {("Herodotus", "Histories 1.1-13, 1.29-33, 1.46-56, 1.79-89, 1.107-140, 1.141, 1.152-3, 1.204-216"): "data/0016-001/0016-001.xml"},
-    {("Hesiod", "Theogony"): "data/0020-001/0020-001.xml"},
-    {("Hesiod", "Works and Days"): "data/0020-002/0020-002.xml"},
-    {("Homer", "Iliad 22"): "data/0012-001/0012-001.xml"},
-    {("Homer", "Odyssey 9"): "data/0012-002/0012-002.xml"},
-    {("Lucian", "True History, Book 1"): "data/0062-0012/0062-0012.xml"},
-    {("Lysias", "On the Murder of Eratosthenes"): "data/0540-001/0540-001.xml"},
-    {("Plato", "Apology"): "data/0059-002/0059-002.xml"},
-    {("Sappho", "1, 16, 31"): "data/0009-002/0009-002.xml"},
-    {("Sophocles", "Ajax"): "data/0011-003/0011-003.xml"},
-    {("Thucydides", "History of the Peloponnesian War"): "data/0003-001/0003-001.xml"}
-]
-
 def fix_malformed_xml(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -304,39 +287,6 @@ async def home(request: Request):
     return templates.TemplateResponse(
         "index.html", {"request": request, "works": works, "title": "Greek Reading List"}
     )
-
-@app.get("/browse", response_class=HTMLResponse)
-async def browse(request: Request):
-    authors = set()
-    for mapping in AUTHOR_WORK_TO_PATH:
-        for (a, w), path in mapping.items():
-            authors.add(a)
-    return templates.TemplateResponse("browse.html", {"request": request, "authors": sorted(authors)})
-
-@app.get("/browse/{author}", response_class=HTMLResponse)
-async def get_author_page(request: Request, author: str):
-    if "-" in author:
-        author = author.replace("-", " ")
-    works = []
-    for mapping in AUTHOR_WORK_TO_PATH:
-        for (a, w), path in mapping.items():
-            if a.lower() == author.lower():
-                works.append((w, path))
-    if not works:
-        raise HTTPException(status_code=404, detail="Author not found")
-    return templates.TemplateResponse("author.html", {"request": request, "author": author, "works": works})
-
-@app.get("/browse/{author}/{work}", response_class=HTMLResponse)
-async def get_work_page(request: Request, author: str, work: str):
-    author = author.replace("-", " ")
-    work = work.replace("-", " ")
-    work_obj = get_work(author, work)
-    if not work_obj:
-        raise HTTPException(status_code=404, detail="Work not found")
-    return templates.TemplateResponse("work.html", {
-        "request": request,
-        "work": work_obj  # pass the whole object; template iterates sections
-    })
 
 @app.get("/read/{urn}/{slug}", response_class=HTMLResponse)
 async def get_section_page(request: Request, urn: str, slug: str, offset: int = 0):
