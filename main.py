@@ -20,7 +20,7 @@ SEARCH_PAGE_SIZE = 50
 
 glaux_tree = None
 glosses_lookup = None
-alignment_lookup = None
+# alignment_lookup = None
 translation_lookup = None
 current_urn = None
 
@@ -99,10 +99,10 @@ async def load_data(urn: str):
         return  # already loaded, skip
     filepath = f"data/{urn}/{urn}.xml"
     glaux_tree = fix_malformed_xml(filepath)
-    glosses_lookup = pd.read_csv(os.path.join("data", urn, "glosses.csv"))
-    alignment_lookup = pd.read_csv(os.path.join("data", urn, "alignments.csv"))[['greek_id', 'english_word', 'sent_id', 'greek_word']]
-    alignment_lookup["alignments"] = ""
-    alignment_lookup = alignment_lookup.dropna(subset=['greek_id', 'sent_id'])
+    glosses_lookup = pd.read_csv(os.path.join("data", urn, "glosses.csv")).set_index('greek_id')
+    # alignment_lookup = pd.read_csv(os.path.join("data", urn, "alignments.csv"))[['greek_id', 'english_word', 'sent_id', 'greek_word']]
+    # alignment_lookup["alignments"] = ""
+    # alignment_lookup = alignment_lookup.dropna(subset=['greek_id', 'sent_id'])
     # alignment_lookup['greek_id'] = alignment_lookup['greek_id'].astype(int)
     translation_lookup = pd.read_csv(os.path.join("data", urn, "translations.csv"))
     current_urn = urn
@@ -176,37 +176,37 @@ def render_span(elem, eng_word_to_ids, sent_id, id_to_word=None):
     gloss = glosses['gloss'].values[0] if not glosses.empty else ""
     head = id_to_word.get(head_id, "Elliptical") if head_id != "0" else "Root"
 
-    print(f"Sentence ID: {sent_id}")
-    alignments = alignment_lookup[
-        (alignment_lookup['greek_id'] == word_id) & 
-        (alignment_lookup['sent_id'] == sent_id+1)
-    ]
-    print(f"Found {len(alignments)} alignments for Greek word ID {word_id} in sentence {sent_id}")
+    # print(f"Sentence ID: {sent_id}")
+    # alignments = alignment_lookup[
+    #     (alignment_lookup['greek_id'] == word_id) & 
+    #     (alignment_lookup['sent_id'] == sent_id+1)
+    # ]
+    # print(f"Found {len(alignments)} alignments for Greek word ID {word_id} in sentence {sent_id}")
 
-    alignment_ids = []
-    for _, row in alignments.iterrows():
-        eng_word = row['english_word'] 
-        print(f"Processing alignment for Greek word ID {word_id} (sentence {sent_id}): English word '{eng_word}'")
-        if isinstance(eng_word, float) and pd.isna(eng_word):
-            continue
-        if eng_word in eng_word_to_ids:
-            alignment_ids.extend([f"{sent_id}-{id}" for id in eng_word_to_ids[eng_word]])
-        else:
-            phrase_tokens = eng_word.split()
-            tokenized_list = list(eng_word_to_ids.keys())
+    # alignment_ids = []
+    # for _, row in alignments.iterrows():
+    #     eng_word = row['english_word'] 
+    #     print(f"Processing alignment for Greek word ID {word_id} (sentence {sent_id}): English word '{eng_word}'")
+    #     if isinstance(eng_word, float) and pd.isna(eng_word):
+    #         continue
+    #     if eng_word in eng_word_to_ids:
+    #         alignment_ids.extend([f"{sent_id}-{id}" for id in eng_word_to_ids[eng_word]])
+    #     else:
+    #         phrase_tokens = eng_word.split()
+    #         tokenized_list = list(eng_word_to_ids.keys())
 
-            found = False
-            for i in range(len(tokenized_list) - len(phrase_tokens) + 1):
-                window = tokenized_list[i:i+len(phrase_tokens)]
-                if ' '.join(window) == eng_word:
-                    for token in window:
-                        alignment_ids.extend([f"{sent_id}-{id}" for id in eng_word_to_ids[token]])
-                    found = True
-                    break   
-            if not found:
-                print(f"Warning: Could not find alignment for '{eng_word}' in sentence {sent_id}")
+    #         found = False
+    #         for i in range(len(tokenized_list) - len(phrase_tokens) + 1):
+    #             window = tokenized_list[i:i+len(phrase_tokens)]
+    #             if ' '.join(window) == eng_word:
+    #                 for token in window:
+    #                     alignment_ids.extend([f"{sent_id}-{id}" for id in eng_word_to_ids[token]])
+    #                 found = True
+    #                 break   
+    #         if not found:
+    #             print(f"Warning: Could not find alignment for '{eng_word}' in sentence {sent_id}")
 
-    alignment = ",".join(str(x) for x in alignment_ids)
+    # alignment = ",".join(str(x) for x in alignment_ids)
 
     text = form if form.strip() else ""
     return html_template.format(
