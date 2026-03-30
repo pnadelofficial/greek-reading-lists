@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+
+{% block title %}Search – Greek Reader{% endblock %}
+
+{% block content %}
+<header>
+    <a href="/" class="home-link">← Reading List</a>
+    <h1>Search</h1>
+</header>
+
+<div class="content">
+
+    {# ── Search form ── #}
+    <form class="search-form" method="get" action="/search">
+        <div class="search-row">
+            <input
+                type="text"
+                name="q"
+                class="search-input"
+                placeholder="e.g. λύω  or  destroy"
+                value="{{ query or '' }}"
+                autofocus
+            >
+            <button type="submit" class="search-btn">Search</button>
+        </div>
+
+        <div class="search-toggles">
+            <label class="toggle-label">
+                <input type="radio" name="mode" value="form"
+                    {% if mode == 'form' %}checked{% endif %}>
+                Surface form
+            </label>
+            <label class="toggle-label">
+                <input type="radio" name="mode" value="lemma"
+                    {% if mode == 'lemma' %}checked{% endif %}>
+                Lemma
+            </label>
+            <label class="toggle-label">
+                <input type="radio" name="mode" value="gloss"
+                    {% if mode == 'gloss' %}checked{% endif %}>
+                English gloss
+            </label>
+        </div>
+    </form>
+
+    {# ── No query yet ── #}
+    {% if query is none %}
+        <p class="search-hint">
+            Search by surface form (exact inflected form as it appears in the text),
+            lemma (dictionary headword), or English gloss (substring match).
+        </p>
+
+    {# ── Query submitted but nothing found ── #}
+    {% elif not results %}
+        <p class="no-results">
+            No results for <strong>{{ query }}</strong>
+            {% if mode == 'gloss' %}(gloss contains){% else %}({{ mode }}){% endif %}.
+        </p>
+
+    {# ── Results ── #}
+    {% else %}
+
+        {# Summary bar #}
+        <div class="results-summary">
+            <span class="result-count">{{ total_occurrences }} occurrence{{ 's' if total_occurrences != 1 }} in {{ works_found }} work{{ 's' if works_found != 1 }}</span>
+            {% if mode != 'gloss' and stats %}
+                <span class="corpus-rank">corpus rank #{{ stats.corpus_rank }}</span>
+            {% endif %}
+        </div>
+
+        {# Corpus stats panel – only meaningful for form/lemma searches #}
+        {% if mode != 'gloss' and stats %}
+        <div class="stats-panel">
+            <div class="stat-block">
+                <div class="stat-value">{{ stats.corpus_count }}</div>
+                <div class="stat-label">total occurrences</div>
+            </div>
+            <div class="stat-block">
+                <div class="stat-value">{{ stats.doc_frequency }}</div>
+                <div class="stat-label">works containing this lemma</div>
+            </div>
+            <div class="stat-block">
+                <div class="stat-value">#{{ stats.corpus_rank }}</div>
+                <div class="stat-label">corpus frequency rank</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# Per-work breakdown with TF-IDF scores #}
+        {% if mode != 'gloss' and tfidf_by_work %}
+        <details class="tfidf-details">
+            <summary>TF-IDF scores by work</summary>
+            <table class="tfidf-table">
+                <thead>
+                    <tr>
+                        <th>Author</th>
+                        <th>Work</th>
+                        <th>Occurrences</th>
+                        <th>TF-IDF</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in tfidf_by_work %}
+                    <tr>
+                        <td>{{ row.author }}</td>
+                        <td>{{ row.title }}</td>
+                        <td class="num">{{ row.count }}</td>
+                        <td class="num">
+                            {% if row.tfidf_score %}
+                                {{ "%.4f"|format(row.tfidf_score) }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </details>
+        {% endif %}
+
+        {# Individual occurrence rows #}
+        <h2>Occurrences</h2>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Form</th>
+                    <th>Lemma</th>
+                    <th>Gloss</th>
+                    <th>Part of speech</th>
+                    <th>Work</th>
+                    <th>Location</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in results %}
+                <tr>
+                    <td class="greek">{{ row.form }}</td>
+                    <td class="greek">{{ row.lemma }}</td>
+                    <td>{{ row.gloss }}</td>
+                    <td class="postag">{{ row.postag }}</td>
+                    <td>{{ row.author }}, <em>{{ row.title }}</em></td>
+                    <td>
+                        {% if row.read_url %}
+                            <a href="{{ row.read_url }}" class="loc-link">sentence {{ row.sentence_id }}</a>
+                        {% else %}
+                            <span class="reference">sentence {{ row.sentence_id }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {# Pagination #}
+        {% if total_occurrences > page_size %}
+        <div class="pagination">
+            {% if offset > 0 %}
+                <a href="/search?q={{ query|urlencode }}&mode={{ mode }}&offset={{ offset - page_size }}"
+                   class="nav-button">← Previous</a>
+            {% else %}
+                <span class="nav-button disabled">← Previous</span>
+            {% endif %}
+
+            <span class="reference">
+                {{ offset + 1 }}–{{ [offset + page_size, total_occurrences] | min }}
+                of {{ total_occurrences }}
+            </span>
+
+            {% if offset + page_size < total_occurrences %}
+                <a href="/search?q={{ query|urlencode }}&mode={{ mode }}&offset={{ offset + page_size }}"
+                   class="nav-button">Next →</a>
+            {% else %}
+                <span class="nav-button disabled">Next →</span>
+            {% endif %}
+        </div>
+        {% endif %}
+
+    {% endif %}
+</div>
+
+<style>
+    /* ── Search form ── */
+    .search-form {
+        margin-bottom: 28px;
+    }
+
+    .search-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+
+    .search-input {
+        flex: 1;
+        padding: 10px 14px;
+        font-family: inherit;
+        font-size: 1.1em;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+
+    .search-input:focus {
+        border-color: #8b4513;
+    }
+
+    .search-btn {
+        padding: 10px 22px;
+        background-color: #8b4513;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 1em;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .search-btn:hover {
+        background-color: #6b3410;
+    }
+
+    .search-toggles {
+        display: flex;
+        gap: 20px;
+        font-size: 0.95em;
+        color: #555;
+    }
+
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+    }
+
+    .toggle-label input[type="radio"] {
+        accent-color: #8b4513;
+        cursor: pointer;
+    }
+
+    /* ── Hint / empty states ── */
+    .search-hint,
+    .no-results {
+        color: #666;
+        font-size: 0.95em;
+        margin-top: 10px;
+    }
+
+    /* ── Summary bar ── */
+    .results-summary {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        margin-bottom: 20px;
+        font-size: 0.95em;
+        color: #555;
+    }
+
+    .result-count {
+        font-weight: bold;
+        color: #333;
+    }
+
+    .corpus-rank {
+        background-color: #fff3e0;
+        border: 1px solid #8b4513;
+        border-radius: 3px;
+        padding: 1px 8px;
+        color: #8b4513;
+        font-size: 0.88em;
+    }
+
+    /* ── Stats panel ── */
+    .stats-panel {
+        display: flex;
+        gap: 0;
+        margin-bottom: 24px;
+        border: 1px solid #e0d0c0;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .stat-block {
+        flex: 1;
+        padding: 14px 18px;
+        text-align: center;
+        border-right: 1px solid #e0d0c0;
+    }
+
+    .stat-block:last-child {
+        border-right: none;
+    }
+
+    .stat-value {
+        font-size: 1.6em;
+        font-weight: bold;
+        color: #8b4513;
+        line-height: 1.2;
+    }
+
+    .stat-label {
+        font-size: 0.78em;
+        color: #888;
+        margin-top: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    /* ── TF-IDF collapsible ── */
+    .tfidf-details {
+        margin-bottom: 24px;
+        border: 1px solid #e0d0c0;
+        border-radius: 6px;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    .tfidf-details summary {
+        cursor: pointer;
+        padding: 10px 16px;
+        font-size: 0.9em;
+        font-weight: bold;
+        color: #8b4513;
+        background-color: #fdf6f0;
+        list-style: none;
+        user-select: none;
+    }
+
+    .tfidf-details summary::before {
+        content: "▶ ";
+        font-size: 0.75em;
+    }
+
+    .tfidf-details[open] summary::before {
+        content: "▼ ";
+    }
+
+    .tfidf-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92em;
+    }
+
+    .tfidf-table th {
+        text-align: left;
+        padding: 7px 14px;
+        color: #8b4513;
+        font-size: 0.82em;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid #e0d0c0;
+        background-color: #fdf6f0;
+    }
+
+    .tfidf-table td {
+        padding: 7px 14px;
+        border-bottom: 1px solid #f0e8e0;
+    }
+
+    .tfidf-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .tfidf-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: #555;
+    }
+
+    /* ── Occurrences table ── */
+    .results-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95em;
+        margin-bottom: 28px;
+    }
+
+    .results-table thead tr {
+        border-bottom: 2px solid #8b4513;
+    }
+
+    .results-table th {
+        text-align: left;
+        padding: 8px 10px;
+        color: #8b4513;
+        font-size: 0.82em;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .results-table td {
+        padding: 8px 10px;
+        vertical-align: top;
+        border-bottom: 1px solid #f0e8e0;
+    }
+
+    .results-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .results-table tbody tr:hover {
+        background-color: #fdf6f0;
+    }
+
+    td.greek {
+        font-size: 1.05em;
+    }
+
+    td.postag {
+        font-family: monospace;
+        font-size: 0.88em;
+        color: #777;
+    }
+
+    .loc-link {
+        color: #8b4513;
+        text-decoration: none;
+        font-size: 0.9em;
+    }
+
+    .loc-link:hover {
+        text-decoration: underline;
+    }
+
+    /* ── Pagination ── */
+    .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+lxml
+pyyaml
+pandas
+nltk
+scikit-learn
+jinja2
+python-multipart

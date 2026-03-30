@@ -2,24 +2,68 @@ from lxml import etree
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+import yaml
 import pandas as pd
 import nltk
 import re
 import os
+import sqlite3
 
 nltk.download('punkt_tab')
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+
+PAGE_SIZE = 10
+SEARCH_DB = "search.db"
+SEARCH_PAGE_SIZE = 50
+
 glaux_tree = None
 glosses_lookup = None
 alignment_lookup = None
 translation_lookup = None
+current_urn = None
+
+def load_reading_list(yaml_path = "reading_list.yaml"):
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    works = []
+    for work in config.get("works", []):
+        urn = work["urn"]
+        data_dir = os.path.join("data", urn)
+        has_data = (
+            os.path.isfile(os.path.join(data_dir, f"{urn}.xml"))
+            and os.path.isfile(os.path.join(data_dir, "glosses.csv"))
+            and os.path.isfile(os.path.join(data_dir, "alignments.csv"))
+            and os.path.isfile(os.path.join(data_dir, "translations.csv"))
+        )
+        sections = []
+        for section in work.get("sections", []):
+            textpart = section["textpart"]
+            slug = textpart.lower().replace(" ", "-")
+            sections.append({
+                "textpart": textpart,
+                "slug": slug,
+                "glaux_sentences": section["glaux_sentences"],
+                "url": f"/read/{urn}/{slug}" if has_data else None,
+            })
+
+        works.append({
+            "urn": urn,
+            "author": work["author"],
+            "title": work["title"],
+            "has_data": has_data,
+            "sections": sections,
+        })
+
+    return works
+WORKS = load_reading_list()
 
 AUTHOR_WORK_TO_PATH = [
     # missing bacchae
     {("Aeschylus", "Eumenides"): "data/0085-007/0085-007.xml"},
-    {("Christian Scripture", "John 1-3"): "data/0031-004/0031-004.xml"},
+    {("Christian Scripture", "John"): "data/0031-004/0031-004.xml"},
     {("Herodotus", "Histories 1.1-13, 1.29-33, 1.46-56, 1.79-89, 1.107-140, 1.141, 1.152-3, 1.204-216"): "data/0016-001/0016-001.xml"},
     {("Hesiod", "Theogony"): "data/0020-001/0020-001.xml"},
     {("Hesiod", "Works and Days"): "data/0020-002/0020-002.xml"},
@@ -65,14 +109,41 @@ def fix_malformed_xml(filepath):
     
     return etree.fromstring(content.encode('utf-8'))
 
-async def load_data(glaux_dir_path):
-    global glaux_tree, glosses_lookup, alignment_lookup, translation_lookup
-    _, glaux_id, _ = glaux_dir_path.split("/")
-    glaux_tree = fix_malformed_xml(glaux_dir_path)
-    glosses_lookup = pd.read_csv(os.path.join("data", glaux_id, "glosses.csv"))
-    alignment_lookup = pd.read_csv(os.path.join("data", glaux_id, "alignments.csv"))
-    translation_lookup = pd.read_csv(os.path.join("data", glaux_id, "translations.csv"))
 
+async def load_data(urn: str):
+    global glaux_tree, glosses_lookup, alignment_lookup, translation_lookup, current_urn
+    if current_urn == urn:
+        return  # already loaded, skip
+    filepath = f"data/{urn}/{urn}.xml"
+    glaux_tree = fix_malformed_xml(filepath)
+    glosses_lookup = pd.read_csv(os.path.join("data", urn, "glosses.csv"))
+    alignment_lookup = pd.read_csv(os.path.join("data", urn, "alignments.csv"))[['greek_id', 'english_word', 'sent_id', 'greek_word']]
+    alignment_lookup["alignments"] = ""
+    alignment_lookup = alignment_lookup.dropna(subset=['greek_id', 'sent_id'])
+    # alignment_lookup['greek_id'] = alignment_lookup['greek_id'].astype(int)
+    translation_lookup = pd.read_csv(os.path.join("data", urn, "translations.csv"))
+    current_urn = urn
+
+def get_work(urn: str):
+    for w in WORKS:
+        if w["urn"] == urn:
+            return w
+    return None
+
+def get_section(work: dict, slug: str):
+    for s in work["sections"]:
+        if s["slug"] == slug:
+            return s
+    return None
+
+def get_adjacent_section(work: dict, slug: str, delta: int):
+    slugs = [s["slug"] for s in work["sections"]]
+    try:
+        idx = slugs.index(slug) + delta
+        return work["sections"][idx] if 0 <= idx < len(work["sections"]) else None
+    except ValueError:
+        return None
+    
 def extract_passage(sentence_id=None):
     if sentence_id:
         xpath = f"//sentence[@id='{sentence_id}']/word"
@@ -81,6 +152,8 @@ def extract_passage(sentence_id=None):
         speaker = glaux_elements[0].get("speaker", None) if glaux_elements else None
         
         translation_text = translation_row['translation'].values[0] if not translation_row.empty else ""
+        if isinstance(translation_text, float) and pd.isna(translation_text):
+            translation_text = "SENTENCE MISSING TRANSLATION"
         translation_tokens = nltk.word_tokenize(translation_text) if translation_text else []
 
         word_to_ids = {}
@@ -120,14 +193,19 @@ def render_span(elem, eng_word_to_ids, sent_id, id_to_word=None):
     gloss = glosses['gloss'].values[0] if not glosses.empty else ""
     head = id_to_word.get(head_id, "Elliptical") if head_id != "0" else "Root"
 
+    print(f"Sentence ID: {sent_id}")
     alignments = alignment_lookup[
-        (alignment_lookup['greek_id'] == int(word_id)) & 
-        (alignment_lookup['sent_id'] == sent_id)
+        (alignment_lookup['greek_id'] == word_id) & 
+        (alignment_lookup['sent_id'] == sent_id+1)
     ]
+    print(f"Found {len(alignments)} alignments for Greek word ID {word_id} in sentence {sent_id}")
 
     alignment_ids = []
     for _, row in alignments.iterrows():
         eng_word = row['english_word'] 
+        print(f"Processing alignment for Greek word ID {word_id} (sentence {sent_id}): English word '{eng_word}'")
+        if isinstance(eng_word, float) and pd.isna(eng_word):
+            continue
         if eng_word in eng_word_to_ids:
             alignment_ids.extend([f"{sent_id}-{id}" for id in eng_word_to_ids[eng_word]])
         else:
@@ -148,7 +226,17 @@ def render_span(elem, eng_word_to_ids, sent_id, id_to_word=None):
     alignment = ",".join(str(x) for x in alignment_ids)
 
     text = form if form.strip() else ""
-    return html_template.format(word_id=word_id, form=form, lemma=lemma, postag=postag, head=head, relation=relation, gloss=gloss, alignment=alignment, text=text)
+    return html_template.format(
+        word_id=word_id, 
+        form=form, 
+        lemma=lemma,
+        postag=postag, 
+        head=head, 
+        relation=relation, 
+        gloss=gloss, 
+        alignment="", #alignment, turning this off for now
+        text=text
+    )
 
 def format_sentence(word_level_html, translation_row, translation_tokens, speaker=None):
     sent_id = translation_row['sent_id'].values[0] if not translation_row.empty else 0
@@ -162,7 +250,7 @@ def format_sentence(word_level_html, translation_row, translation_tokens, speake
         <div class="speaker"><b>Speaker: </b>{speaker}</div>
         <div class="word-level"><b>Original: </b>{word_level_html}</div>
         <div class="translation"><b>Translation: </b>{translation_html}</div>
-        <div class="note"><b>Note: </b>{note}</div>
+        <details class="note"><summary>Note</summary>{note}</details>
         <br/>
         </div>"""
         note = translation_row['notes'].values[0] if not translation_row.empty else ""
@@ -176,7 +264,7 @@ def format_sentence(word_level_html, translation_row, translation_tokens, speake
         html_template = """<div class="sentence">
         <div class="word-level"><b>Original: </b>{word_level_html}</div>
         <div class="translation"><b>Translation: </b>{translation_html}</div>
-        <div class="note"><b>Note: </b>{note}</div>
+        <details class="note"><summary>Note</summary>{note}</details>
         <br/>
         </div>"""
         note = translation_row['notes'].values[0] if not translation_row.empty else ""
@@ -186,9 +274,36 @@ def format_sentence(word_level_html, translation_row, translation_tokens, speake
             note=note
         )
 
+def get_db():
+    conn = sqlite3.connect(f"file:{SEARCH_DB}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def sentence_id_to_read_url(urn: str, sentence_id: str, works: list) -> str | None:
+    work = next((w for w in works if w["urn"] == urn), None)
+    if not work or not work.get("has_data"):
+        return None
+ 
+    try:
+        sid = int(sentence_id)
+    except (TypeError, ValueError):
+        return None
+ 
+    for section in work.get("sections", []):
+        start, end = section["glaux_sentences"]
+        if start <= sid <= end:
+            # offset is the start of the PAGE_SIZE-block containing this sentence
+            offset = ((sid - start) // PAGE_SIZE) * PAGE_SIZE
+            return f"/read/{urn}/{section['slug']}?offset={offset}"
+    return None
+ 
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "title": "Greek Reading List"})
+    works = load_reading_list()
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "works": works, "title": "Greek Reading List"}
+    )
 
 @app.get("/browse", response_class=HTMLResponse)
 async def browse(request: Request):
@@ -200,74 +315,240 @@ async def browse(request: Request):
 
 @app.get("/browse/{author}", response_class=HTMLResponse)
 async def get_author_page(request: Request, author: str):
-    print(author)
+    if "-" in author:
+        author = author.replace("-", " ")
     works = []
     for mapping in AUTHOR_WORK_TO_PATH:
         for (a, w), path in mapping.items():
             if a.lower() == author.lower():
                 works.append((w, path))
     if not works:
-        print(f"No works found for author: {author}")
         raise HTTPException(status_code=404, detail="Author not found")
     return templates.TemplateResponse("author.html", {"request": request, "author": author, "works": works})
 
 @app.get("/browse/{author}/{work}", response_class=HTMLResponse)
 async def get_work_page(request: Request, author: str, work: str):
-    path = None
+    author = author.replace("-", " ")
     work = work.replace("-", " ")
-    for mapping in AUTHOR_WORK_TO_PATH:
-        for (a, w), p in mapping.items():
-            if a.lower() == author.lower() and w.lower() == work.lower():
-                path = p
-                break
-    print(path)
-    await load_data(path)
+    work_obj = get_work(author, work)
+    if not work_obj:
+        raise HTTPException(status_code=404, detail="Work not found")
+    return templates.TemplateResponse("work.html", {
+        "request": request,
+        "work": work_obj  # pass the whole object; template iterates sections
+    })
 
-    # check number of sentences in the work
-    num_sentences = len(glaux_tree.xpath("//sentence"))
+@app.get("/read/{urn}/{slug}", response_class=HTMLResponse)
+async def get_section_page(request: Request, urn: str, slug: str, offset: int = 0):
+    work_obj = get_work(urn)
+    if not work_obj:
+        raise HTTPException(status_code=404, detail="Work not found")
+
+    section = get_section(work_obj, slug)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    await load_data(urn)
+
+    start, end = section["glaux_sentences"]
+    section_length = end - start + 1
+
+    # Clamp offset to valid range
+    offset = max(0, min(offset, section_length - 1))
+    page_start = start + offset
+    page_end = min(start + offset + PAGE_SIZE - 1, end)
+    is_last_page = page_end >= end
+
     aligned_passages = []
-    for i in range(1, num_sentences+1):
-        sentence_id = str(i)
-        passage_tup = extract_passage(sentence_id)
-        word_level_html, translation_row, translation_tokens, speaker = passage_tup
+    for i in range(page_start, page_end + 1):
+        
+        word_level_html, translation_row, translation_tokens, speaker = extract_passage(str(i))
+
         aligned_passages.append((word_level_html, translation_row, translation_tokens, speaker))
 
-    html_template = "<div class='sentences'>{aligned_passages}</div>"
-    aligned_passages_html = html_template.format(aligned_passages="".join([format_sentence(word_level_html, translation_row, translation_tokens, speaker) for word_level_html, translation_row, translation_tokens, speaker in aligned_passages]))
+    passage_html = "<div class='sentences'>{}</div>".format(
+        "".join(format_sentence(*p) for p in aligned_passages)
+    )
 
-    if not path:
-        raise HTTPException(status_code=404, detail="Work not found")
-    return templates.TemplateResponse("work.html", {"request": request, "author": author.capitalize(), "work": work.capitalize(), "path": path, "passage_html": aligned_passages_html})
-
-@app.get("/browse/{author}/{work}/{sentence_id}", response_class=HTMLResponse)
-async def get_sentence_page(request: Request, author: str, work: str, sentence_id: str):
-    path = None
-    work = work.replace("-", " ")
-    for mapping in AUTHOR_WORK_TO_PATH:
-        for (a, w), p in mapping.items():
-            print(f"Checking author: {a} against {author}, work: {w} against {work}")
-            if a.lower() == author.lower() and w.lower() == work.lower():
-                path = p
-                break
-
-    print(path)
-    await load_data(path)
-    
-    if not path:
-        raise HTTPException(status_code=404, detail="Sentence not found")
-    
-    if "-" in sentence_id:
-        start, end = sentence_id.split("-")
-        aligned_passages = []
-        for i in range(int(start), int(end)+1):
-            passage_tup = extract_passage(str(i))
-            word_level_html, translation_row, translation_tokens, speaker = passage_tup
-            aligned_passages.append((word_level_html, translation_row, translation_tokens, speaker))
+    # Build prev URL
+    if offset == 0:
+        prev_section = get_adjacent_section(work_obj, slug, -1)
+        if prev_section:
+            prev_start, prev_end = prev_section["glaux_sentences"]
+            prev_length = prev_end - prev_start + 1
+            prev_last_offset = ((prev_length - 1) // PAGE_SIZE) * PAGE_SIZE
+            prev_url = f"/read/{urn}/{prev_section['slug']}?offset={prev_last_offset}"
+        else:
+            prev_url = None
     else:
-        passage_tup = extract_passage(sentence_id)
-        word_level_html, translation_row, translation_tokens, speaker = passage_tup
-        aligned_passages = [(word_level_html, translation_row, translation_tokens, speaker)]
+        prev_url = f"/read/{urn}/{slug}?offset={offset - PAGE_SIZE}"
 
-    html_template = "<div class='sentences'>{aligned_passages}</div>"
-    aligned_passages_html = html_template.format(aligned_passages="".join([format_sentence(word_level_html, translation_row, translation_tokens, speaker) for word_level_html, translation_row, translation_tokens, speaker in aligned_passages]))
-    return templates.TemplateResponse("sentence.html", {"request": request, "author": author.capitalize(), "work": work.title(), "sentence_id": sentence_id, "passage_html": aligned_passages_html})
+    # Build next URL
+    if is_last_page:
+        next_section = get_adjacent_section(work_obj, slug, 1)
+        next_url = f"/read/{urn}/{next_section['slug']}?offset=0" if next_section else None
+    else:
+        next_url = f"/read/{urn}/{slug}?offset={offset + PAGE_SIZE}"
+
+    return templates.TemplateResponse("section.html", {
+        "request": request,
+        "work": work_obj,
+        "section": section,
+        "passage_html": passage_html,
+        "prev_url": prev_url,
+        "next_url": next_url,
+        "offset": offset,
+        "page_start": page_start,
+        "page_end": page_end,
+        "section_start": start,
+        "section_end": end,
+    })
+
+@app.get("/search", response_class=HTMLResponse)
+async def search(request: Request, q: str | None = None, mode: str = "lemma", offset: int = 0,):
+
+    if mode not in ("form", "lemma", "gloss"):
+        mode = "lemma"
+ 
+    # No query yet – render the empty search page
+    if not q or not q.strip():
+        return templates.TemplateResponse("search.html", {
+            "request": request,
+            "query": None,
+            "mode": mode,
+            "results": [],
+            "stats": None,
+            "tfidf_by_work": [],
+            "total_occurrences": 0,
+            "works_found": 0,
+            "offset": 0,
+            "page_size": SEARCH_PAGE_SIZE,
+        })
+ 
+    q = q.strip()
+ 
+    try:
+        conn = get_db()
+    except sqlite3.OperationalError:
+        # DB hasn't been built yet
+        raise HTTPException(
+            status_code=503,
+            detail="Search index not available. Run build_index.py first."
+        )
+    
+    with conn:
+        if mode == "form":
+            count_row = conn.execute(
+                "SELECT COUNT(*) FROM occurrences WHERE form = ?", (q,)
+            ).fetchone()
+            total = count_row[0]
+ 
+            rows = conn.execute(
+                """SELECT urn, author, title, sentence_id, word_id,
+                          form, lemma, postag, gloss
+                   FROM occurrences
+                   WHERE form = ?
+                   ORDER BY author, title, CAST(sentence_id AS INTEGER)
+                   LIMIT ? OFFSET ?""",
+                (q, SEARCH_PAGE_SIZE, offset),
+            ).fetchall()
+ 
+        elif mode == "lemma":
+            count_row = conn.execute(
+                "SELECT COUNT(*) FROM occurrences WHERE lemma = ?", (q,)
+            ).fetchone()
+            total = count_row[0]
+ 
+            rows = conn.execute(
+                """SELECT urn, author, title, sentence_id, word_id,
+                          form, lemma, postag, gloss
+                   FROM occurrences
+                   WHERE lemma = ?
+                   ORDER BY author, title, CAST(sentence_id AS INTEGER)
+                   LIMIT ? OFFSET ?""",
+                (q, SEARCH_PAGE_SIZE, offset),
+            ).fetchall()
+ 
+        else:  # gloss substring
+            pattern = f"%{q}%"
+            count_row = conn.execute(
+                "SELECT COUNT(*) FROM occurrences WHERE gloss LIKE ?", (pattern,)
+            ).fetchone()
+            total = count_row[0]
+ 
+            rows = conn.execute(
+                """SELECT urn, author, title, sentence_id, word_id,
+                          form, lemma, postag, gloss
+                   FROM occurrences
+                   WHERE gloss LIKE ?
+                   ORDER BY author, title, CAST(sentence_id AS INTEGER)
+                   LIMIT ? OFFSET ?""",
+                (pattern, SEARCH_PAGE_SIZE, offset),
+            ).fetchall()
+        
+        stats = None
+        tfidf_by_work = []
+ 
+        if mode != "gloss":
+            # For form searches we look up stats by lemma of the matched form.
+            # We grab the most common lemma associated with this form if there
+            # are multiple (edge-case for homographs).
+            if mode == "form":
+                lemma_row = conn.execute(
+                    """SELECT lemma FROM occurrences
+                       WHERE form = ?
+                       GROUP BY lemma
+                       ORDER BY COUNT(*) DESC
+                       LIMIT 1""",
+                    (q,),
+                ).fetchone()
+                lookup_lemma = lemma_row["lemma"] if lemma_row else q
+            else:
+                lookup_lemma = q
+ 
+            stats_row = conn.execute(
+                "SELECT * FROM lemma_stats WHERE lemma = ?", (lookup_lemma,)
+            ).fetchone()
+            if stats_row:
+                stats = dict(stats_row)
+ 
+            # Per-work occurrence counts joined with TF-IDF scores
+            tfidf_rows = conn.execute(
+                """SELECT o.author, o.title, o.urn,
+                          COUNT(*) AS count,
+                          t.tfidf_score
+                   FROM occurrences o
+                   LEFT JOIN tfidf_scores t
+                          ON t.lemma = ? AND t.urn = o.urn
+                   WHERE o.lemma = ?
+                   GROUP BY o.urn
+                   ORDER BY t.tfidf_score DESC NULLS LAST""",
+                (lookup_lemma, lookup_lemma),
+            ).fetchall()
+            tfidf_by_work = [dict(r) for r in tfidf_rows]
+ 
+    conn.close()
+    
+    results = []
+    works = WORKS  # module-level list already loaded at startup
+    for row in rows:
+        r = dict(row)
+        r["read_url"] = sentence_id_to_read_url(r["urn"], r["sentence_id"], works)
+        results.append(r)
+ 
+    works_found = len({r["urn"] for r in results}) if results else (
+        len(tfidf_by_work) if tfidf_by_work else 0
+    )
+ 
+    return templates.TemplateResponse("search.html", {
+        "request": request,
+        "query": q,
+        "mode": mode,
+        "results": results,
+        "stats": stats,
+        "tfidf_by_work": tfidf_by_work,
+        "total_occurrences": total,
+        "works_found": works_found,
+        "offset": offset,
+        "page_size": SEARCH_PAGE_SIZE,
+    })

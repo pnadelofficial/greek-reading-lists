@@ -178,6 +178,28 @@
                 background-color: #ffeb3b;
                 font-weight: bold;
             }
+
+            details.note {
+                margin-top: 4px;
+                font-size: 0.9em;
+                color: #666;
+            }
+
+            details.note summary {
+                cursor: pointer;
+                color: #8b4513;
+                font-weight: bold;
+                list-style: none; /* removes the default triangle on some browsers */
+            }
+
+            details.note summary::before {
+                content: "▶ ";
+                font-size: 0.75em;
+            }
+
+            details.note[open] summary::before {
+                content: "▼ ";
+            }
         </style>
     </head>
     <body>

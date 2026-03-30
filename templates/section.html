@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}{{ work.author }} – {{ work.title }}{% endblock %}
+
+{% block content %}
+<header>
+    <a href="/" class="home-link">← Reading List</a>
+    <h1>{{ work.author }}, <em>{{ work.title }}</em></h1>
+    {% if section.textpart != "All" %}
+    <p class="reference">{{ section.textpart }}</p>
+    {% endif %}
+</header>
+
+<div class="content">
+    {{ passage_html | safe }}
+</div>
+
+<div class="navigation">
+    {% if prev_url %}
+        <a href="{{ prev_url }}" class="nav-button">← Previous</a>
+    {% else %}
+        <span class="nav-button disabled">← Previous</span>
+    {% endif %}
+
+    <span class="reference">
+        sentences {{ page_start }}–{{ page_end }}
+        of {{ section_start }}–{{ section_end }}
+    </span>
+
+    {% if next_url %}
+        <a href="{{ next_url }}" class="nav-button">Next →</a>
+    {% else %}
+        <span class="nav-button disabled">Next →</span>
+    {% endif %}
+</div>
+{% endblock %}
