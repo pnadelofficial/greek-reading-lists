@@ -10,7 +10,7 @@ class SearchIndex:
     def _verify(self):
         try: 
             conn = self._connect()
-            conn.execute("SELECT 1 FROM sentences LIMIT 1")
+            conn.execute("SELECT 1 FROM occurrences LIMIT 1")
             conn.close()
         except sqlite3.OperationalError as e:
             raise RuntimeError(f"Search index at '{self._db_path}' is missing or incomplete. Run build_index.py first.") from e
