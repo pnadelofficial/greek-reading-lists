@@ -66,7 +66,7 @@ class SearchIndex:
             params = (q,)
         else:  # gloss substring
             where = "gloss LIKE ?"
-            params = (f"%{q}%",)
+            params = (f"% {q} %",)
  
         total = conn.execute(
             f"SELECT COUNT(*) FROM occurrences WHERE {where}", params

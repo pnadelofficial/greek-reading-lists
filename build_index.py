@@ -100,7 +100,7 @@ def extract_tokens(urn, author, title):
                 "form": form,
                 "lemma": lemma,
                 "postag": postag,
-                "gloss": str(gloss) if gloss else "",
+                "gloss": f" {str(gloss)} " if gloss else "",
             })
  
     return tokens
