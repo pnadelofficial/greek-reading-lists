@@ -57,7 +57,7 @@ class WorkReader:
             translation_text = trans_row.get("translation", "")
             if not isinstance(translation_text, str) or not translation_text.strip():
                 translation_text = "SENTENCE MISSING TRANSLATION"
-            note = trans_row.get("note", "")
+            note = trans_row.get("notes", "")
         else:
             translation_text = "SENTENCE MISSING TRANSLATION"
             note = ""
